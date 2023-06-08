@@ -6,7 +6,7 @@ Keycloak based access control layer solution with APISIX was designed to replace
 
 Deployment is via GitLab CI/CD pipeline. 
 
-Deployment follows similar pattern like other components, Operator with Helm charts and substituting values to template files.
+Deployment follows similar pattern like other components, Helm charts and substituting values to template files.
 We manually configured a client in Keycloack, and then imported that using Keycloak’s import mechanism.
 It’s recommended to follow this pattern, or then make regular backups of the database (postgres).
 User creation and management can be done via CI/CD pipe, but this is quite cumbersome and recommend manual approach, if there are not too many user requests.
