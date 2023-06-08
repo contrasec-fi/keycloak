@@ -1,0 +1,16 @@
+{
+    "firstName": "Scorpio",
+    "lastName": "Reader",
+    "email": "scorpioreader@DOMAIN",
+    "enabled": "true",
+    "username": "scorpioreader",
+    "id": "f4f5b633-874a-4367-9f8e-358f3988f20f",
+    "credentials": [
+        {
+            "type": "password",
+            "value": "KEYCLOAK_USER_PASSWORD",
+            "temporary": false
+        }
+    ],
+    "groups": ["scorpio-users"]
+}

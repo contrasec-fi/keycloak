@@ -1,0 +1,99 @@
+.deploy_template: &deploy_template
+  image: dtzar/helm-kubectl
+  stage: deploy
+  when: manual
+  before_script:
+    # Write kubeconfig to file and remove world-read permission
+    - mkdir ~/.kube
+    - echo "$KUBECONFIGFILE" > ~/.kube/config
+    - chmod go-r ~/.kube/config
+  script:
+    - echo "Installing helm charts"
+    # Install bitnami/keycloak charts
+    - helm repo add bitnami https://charts.bitnami.com/bitnami
+    
+    - helm repo update
+
+    #- envsubst < ./keycloak/values.yaml | tee ./keycloak/values.yaml
+    - sed -i "s/KEYCLOAK_ADMIN_PASSWORD/${KEYCLOAK_ADMIN_PASSWORD}/g" ./keycloak/values.yaml
+    - sed -i "s/KEYCLOAK_CLIENT_SECRET/${KEYCLOAK_CLIENT_SECRET}/g" ./keycloak/apisix-realm.json
+
+    - kubectl -n $CI_COMMIT_REF_NAME create secret generic realm-secret --from-file=./keycloak/apisix-realm.json --kubeconfig ~/.kube/config || true
+
+    - echo "Deplyoing Keycloak"
+    # Install Keycloak using values.yaml
+    - helm upgrade --install keycloak bitnami/keycloak -f ./keycloak/values.yaml --version "10.1.5" --create-namespace --namespace $CI_COMMIT_REF_NAME --history-max 3 --kubeconfig ~/.kube/config
+
+    ## Wait for keycloak
+    - export KEYCLOAK_POD=$(kubectl -n $CI_COMMIT_REF_NAME get po -o custom-columns=":metadata.name" --kubeconfig ~/.kube/config| grep keycloak-0)
+    - kubectl wait pod -n $CI_COMMIT_REF_NAME $KEYCLOAK_POD --for condition=Ready --timeout=30m --kubeconfig ~/.kube/config
+    - sleep 30
+    - kubectl -n $CI_COMMIT_REF_NAME exec -it keycloak-0 --kubeconfig ~/.kube/config -- bash -c 'cd /opt/bitnami/keycloak/bin && ./kc.sh import --file /realm/apisix-realm.json' || true
+    - kubectl -n $CI_COMMIT_REF_NAME rollout restart statefulset keycloak --kubeconfig ~/.kube/config
+    - sleep 30
+
+
+.configuration_template: &configuration_template
+  image: ubuntu:trusty
+  # Only run deploy stage from staging branch
+  stage: config
+  when: manual
+  allow_failure: true
+  before_script:
+    # Install useful tools
+    - apt update && apt install curl jq -y
+
+    # Announce namespace
+    - echo Configuring $CI_COMMIT_REF_NAME namespace
+  script:
+    - KEYCLOAK_HOST=keycloak.$CI_COMMIT_REF_NAME.svc.cluster.local
+    - KEYCLOAK_PORT=80
+
+    # SED
+    - sed -i "s/KEYCLOAK_USER_PASSWORD/${KEYCLOAK_USER_PASSWORD}/g" ./keycloak/scorpio-reader-user.json
+    - sed -i "s/DOMAIN/${DOMAIN}/g" ./keycloak/scorpio-reader-user.json
+
+    # KEYCLOAK
+    ## Wait for keycloak
+    - until nc -z $KEYCLOAK_HOST $KEYCLOAK_PORT 2>&1; do sleep 10; done
+    ## Get admin token for following requests
+    - TOKEN=$(curl --location --request POST http://$KEYCLOAK_HOST:$KEYCLOAK_PORT/realms/master/protocol/openid-connect/token --header 'Content-Type:application/x-www-form-urlencoded' --data-urlencode 'client_id=admin-cli' --data-urlencode 'username=admin' --data-urlencode "password=$KEYCLOAK_ADMIN_PASSWORD" --data-urlencode 'grant_type=password' --silent --retry 5 --retry-delay 30 | jq -r '.access_token')
+    ## Configure default user "Scorpio Reader" into Apisix-realm
+    - curl http://$KEYCLOAK_HOST:$KEYCLOAK_PORT/admin/realms/apisix-realm/users -H "Authorization:Bearer $TOKEN" -H 'Content-Type:application/json' -X POST -T ./keycloak/scorpio-reader-user.json --retry 5 --retry-delay 30 || echo command failed $?
+    ## Assign role for Scorpio Reader
+    - USERID=$(curl http://$KEYCLOAK_HOST:$KEYCLOAK_PORT/admin/realms/apisix-realm/users/?username=scorpioreader -H "Authorization:Bearer $TOKEN" --retry 5 --retry-delay 30 || echo command failed $?); id=$(echo "$USERID" | sed -n 's/.*"id":"\([^"]*\)".*/\1/p'); echo "$id"
+    - curl http://$KEYCLOAK_HOST:$KEYCLOAK_PORT/admin/realms/apisix-realm/users/$id/role-mappings/clients/b80e5f9f-4198-44da-9ec2-3fd9bf7c7534 -H "Authorization:Bearer $TOKEN" -H 'Content-Type:application/json' -X POST -T ./keycloak/scorpio-role.json --retry 5 --retry-delay 30 || echo command failed $?
+
+
+
+stages:
+  - deploy
+  - config
+
+# Deployment setup
+do deploy staging:
+  tags:
+  - profirator
+  <<: *deploy_template
+  variables:
+    KUBECONFIGFILE: $KUBECONFIG
+    KEYCLOAK_ADMIN_PASSWORD: $STAGING_KEYCLOAK_ADMIN_PASSWORD
+    KEYCLOAK_CLIENT_SECRET: $STAGING_KEYCLOAK_CLIENT_SECRET
+    SCORPIO_DOMAIN: $STAGING_SCORPIO_DOMAIN
+    SCORPIO_INTERNAL: $STAGING_SCORPIO_INTERNAL
+  only:
+    - odala-staging
+
+do configure staging:
+  tags:
+  - profirator
+  <<: *configuration_template
+  variables:
+    KUBECONFIGFILE: $KUBECONFIG
+    KEYCLOAK_ADMIN_PASSWORD: $STAGING_KEYCLOAK_ADMIN_PASSWORD
+    KEYCLOAK_USER_PASSWORD: $STAGING_KEYCLOAK_USER_PASSWORD
+    SCORPIO_DOMAIN: $STAGING_SCORPIO_DOMAIN
+    SCORPIO_INTERNAL: $STAGING_SCORPIO_INTERNAL
+    DOMAIN: $DOMAIN_STAGING
+  only:
+    - odala-staging
