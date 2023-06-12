@@ -9,7 +9,7 @@ metadata:
   name: keycloak
 spec:
   rules:
-  - host: keycloak.staging.odala.kiel.de
+  - host: keycloak.DOMAIN
     http:
       paths:
       - backend:
@@ -21,5 +21,5 @@ spec:
         pathType: Prefix
   tls:
   - hosts:
-    - keycloak.staging.odala.kiel.de
+    - keycloak.DOMAIN
     secretName: keycloak-cert
