@@ -2,6 +2,8 @@
 
 Keycloak based access control layer solution with APISIX was designed to replace and give an alternative for Umbrella and Keyrock based solution.
 
+Keycloak uses PostgreSQL to store users, groups and realms that contains access control related policies for users.
+
 # 2 Configurations
 
 Deployment is via GitLab CI/CD pipeline. 
@@ -10,6 +12,11 @@ Deployment follows similar pattern like other components, Helm charts and substi
 We manually configured a client in Keycloack, and then imported that using Keycloak’s import mechanism.
 It’s recommended to follow this pattern, or then make regular backups of the database (postgres).
 User creation and management can be done via CI/CD pipe, but this is quite cumbersome and recommend manual approach, if there are not too many user requests.
+
+If access from Internet is needed for Keycloak, replace `DOMAIN` in `keycloak-ingress.yaml` and execute kubectl command to apply it:
+```
+kubectl --namespace NAMESPACE apply -f keycloak-ingress.yaml
+```
 
 # 2.1 Intergration with APISIX
 
@@ -65,6 +72,7 @@ As an admin, you have access to the client application which holds the secrets n
 
 # 5 Known issues / to be developed
 
+Backups needs to be handled in case of data corruption.
 
 Components- Keycloak
 
